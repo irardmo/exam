@@ -1,0 +1,1 @@
+<?php echo 'Smart Exam System - No Partial Credit'; ?>
