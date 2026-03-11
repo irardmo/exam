@@ -24,12 +24,12 @@ if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['form']??'')==='create_user'){
     if($name && $username && $password && in_array($role,['admin','teacher'])){
         $hash=password_hash($password,PASSWORD_BCRYPT);
         
-        // FIX 1: UPDATED INSERT QUERY (Removed 'name' column)
-        $stmt=$conn->prepare("INSERT INTO users (username,password_hash,role) VALUES (?,?,?)");
+        // FIX 1: UPDATED INSERT QUERY (Include 'name' column)
+        $stmt=$conn->prepare("INSERT INTO users (name,username,password_hash,role) VALUES (?,?,?,?)");
         
         if ($stmt) {
-             // 'sss' for username, password_hash, role
-             $stmt->bind_param('sss',$username,$hash,$role); 
+             // 'ssss' for name, username, password_hash, role
+             $stmt->bind_param('ssss',$name,$username,$hash,$role);
              if ($stmt->execute()) {
                  $_SESSION['admin_msg'] = "User created successfully with role: " . $role;
              } else {

@@ -44,10 +44,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // 3a. Insert into users table (Authentication)
             // FIX: Add 'name' column and its placeholder (?)
+            $full_name = trim($first_name . ' ' . $last_name);
             $stmt_u = $conn->prepare("INSERT INTO users (name, username, password_hash, role, created_at) VALUES (?, ?, ?, 'student', NOW())");
             if ($stmt_u) {
-                // FIX: Bind $first_name to the new 'name' placeholder
-                $stmt_u->bind_param('sss', $first_name, $username, $hashed);
+                // FIX: Bind $full_name to the new 'name' placeholder
+                $stmt_u->bind_param('sss', $full_name, $username, $hashed);
                 
                 if (!$stmt_u->execute()) $success_flag = false;
                 $user_id = $conn->insert_id;
