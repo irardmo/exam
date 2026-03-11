@@ -58,66 +58,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['question']) && empty(
 }
 
 // ----------------------------------------------------------------------
-// 2. Handle CSV or DOCX upload (SECURE, PERFORMANT, & COLUMN-FIXED)
+// 2. Handle Multiple File (CSV or DOCX) or Folder upload
 // ----------------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
-    $fileType = pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['files']['name'][0])) {
     $exam_id = (int)$_POST['exam_id'];
     $created_by = $_SESSION['user']['id'];
+    $total_rowCount = 0;
+    $errors = [];
 
-    if ($_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-        $message = "❌ Upload error. Please try again.";
-    } else {
-        $tmpName = $_FILES['file']['tmp_name'];
+    foreach ($_FILES['files']['name'] as $i => $name) {
+        if ($_FILES['files']['error'][$i] !== UPLOAD_ERR_OK) {
+            $errors[] = "❌ Error uploading $name.";
+            continue;
+        }
+
+        $tmpName = $_FILES['files']['tmp_name'][$i];
+        $fileType = pathinfo($name, PATHINFO_EXTENSION);
         $rowCount = 0;
 
         if ($fileType === 'csv') {
             if (($file = fopen($tmpName, "r")) !== false) {
-                // FIX: Prepare statement once before the loop (performance and security)
                 $sql = "INSERT INTO questions (exam_id, question_text, option_a, option_b, option_c, option_d, correct_answer, created_by, created_at)
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
                 $stmt = $conn->prepare($sql);
-                
-                if (!$stmt) {
-                    $message = "❌ Error preparing statement for CSV upload: " . $conn->error;
-                } else {
-                    // skip header if your CSV has one:
-                    // fgetcsv($file, 10000, ",");
-
+                if ($stmt) {
                     while (($row = fgetcsv($file, 10000, ",")) !== false) {
                         if (count($row) < 6) continue;
-
                         $question_text = $row[0] ?? '';
                         $option_a = $row[1] ?? '';
                         $option_b = $row[2] ?? '';
                         $option_c = $row[3] ?? '';
                         $option_d = $row[4] ?? '';
                         $correct_answer = strtoupper(trim($row[5] ?? ''));
-
                         if ($question_text && $option_a && $option_b && $option_c && $option_d && in_array($correct_answer, ['A','B','C','D'], true)) {
-
-                            // FIX: Bind and execute prepared statement inside the loop
-                            $stmt->bind_param('issssssi',
-                                $exam_id,
-                                $question_text,
-                                $option_a,
-                                $option_b,
-                                $option_c,
-                                $option_d,
-                                $correct_answer,
-                                $created_by
-                            );
-                            if ($stmt->execute()) {
-                                $rowCount++;
-                            }
+                            $stmt->bind_param('issssssi', $exam_id, $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer, $created_by);
+                            if ($stmt->execute()) $rowCount++;
                         }
                     }
                     $stmt->close();
-                    $message = "✅ $rowCount questions uploaded successfully!";
                 }
                 fclose($file);
-            } else {
-                $message = "❌ Unable to read the CSV file.";
             }
         } elseif ($fileType === 'docx') {
             $text = docx_to_text($tmpName);
@@ -136,25 +116,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
                         $od = $item['D'];
                         $ca = $item['correct'];
                         $at = $item['answer_text'];
-
-                        $stmt->bind_param('issssssssi',
-                            $exam_id, $qtype, $qtext, $oa, $ob, $oc, $od, $ca, $at, $created_by
-                        );
-                        if ($stmt->execute()) {
-                            $rowCount++;
-                        }
+                        $stmt->bind_param('issssssssi', $exam_id, $qtype, $qtext, $oa, $ob, $oc, $od, $ca, $at, $created_by);
+                        if ($stmt->execute()) $rowCount++;
                     }
                     $stmt->close();
-                    $message = "✅ $rowCount questions uploaded from DOCX successfully!";
-                } else {
-                    $message = "❌ Error preparing statement for DOCX upload: " . $conn->error;
                 }
-            } else {
-                $message = "❌ Failed to parse DOCX file.";
             }
-        } else {
-            $message = "❌ Unsupported file type.";
         }
+        $total_rowCount += $rowCount;
+    }
+
+    $message = "✅ $total_rowCount questions uploaded from " . count($_FILES['files']['name']) . " files successfully!";
+    if (!empty($errors)) {
+        $message .= "<br>" . implode("<br>", $errors);
     }
 }
 ?>
@@ -199,7 +173,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
 
     <div id="upload-csv" class="tab-content">
         <h3>Upload Questions (CSV or DOCX)</h3>
-        <form method="POST" enctype="multipart/form-data">
+        <p class="muted">You can select multiple files or a folder. Max size: 300MB.</p>
+        <form method="POST" enctype="multipart/form-data" id="upload-form">
             <div class="form-group">
                 <label for="exam_id_upload">Select Exam:</label>
                 <select id="exam_id_upload" name="exam_id" required>
@@ -215,8 +190,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
             </div>
 
             <div class="form-group">
-                <label for="file">Select File (CSV or DOCX):</label>
-                <input type="file" id="file" name="file" accept=".csv,.docx" required>
+                <label for="file">Select Files or Folder (CSV or DOCX):</label>
+                <input type="file" id="file" name="files[]" accept=".csv,.docx" multiple webkitdirectory mozdirectory required>
             </div>
 
             <button type="submit" class="btn">Upload</button>

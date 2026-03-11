@@ -14,6 +14,8 @@ function docx_to_text($file) {
             $zip->close();
             
             // FIX 1: Robust XML parsing.
+            // Replace text node ends with space to prevent word collapsing.
+            $xml_content = preg_replace('/<\/w:t>/', ' ', $xml_content);
             // Replace paragraph ends and line breaks with newlines to preserve structure for the parser.
             $xml_content = preg_replace('/<\/w:p>/', "\n", $xml_content);
             $xml_content = preg_replace('/<w:br\/>/', "\n", $xml_content);
