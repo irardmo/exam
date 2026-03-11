@@ -68,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['files']['name'][0])
 
     foreach ($_FILES['files']['name'] as $i => $name) {
         if ($_FILES['files']['error'][$i] !== UPLOAD_ERR_OK) {
-            $errors[] = "❌ Error uploading $name.";
+            $errors[] = "❌ Error uploading " . h($name) . ".";
             continue;
         }
 
