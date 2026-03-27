@@ -13,21 +13,7 @@ require_role('student');
 $student_id = $_SESSION['user']['id'];
 $exam_id = (int)($_GET['exam_id'] ?? 0);
 
-// 🚫 Block retake: check if student already attempted this exam
-$stmtCheck = $conn->prepare("SELECT id FROM attempts WHERE exam_id = ? AND student_id = ? AND submitted_at IS NOT NULL LIMIT 1");
-if (!$stmtCheck) {
-    die("Query error (attempts check): " . $conn->error);
-}
-$stmtCheck->bind_param("ii", $exam_id, $student_id);
-$stmtCheck->execute();
-$resCheck = $stmtCheck->get_result();
-
-// Check if a completed attempt exists. If so, redirect to the dashboard.
-if ($resCheck && $resCheck->num_rows > 0) {
-    header("Location: student_dashboard.php");
-    exit;
-}
-$stmtCheck->close();
+// Allow multiple attempts, but exclude already answered questions (handled below)
 
 // ✅ Fetch exam
 $stmt = $conn->prepare("SELECT * FROM exams WHERE id = ?");
@@ -40,9 +26,20 @@ if (!$exam) {
     die("Exam not found for ID: " . $exam_id);
 }
 
-// ✅ Fetch 50 random questions
-$qstmt = $conn->prepare("SELECT * FROM questions WHERE exam_id = ? ORDER BY RAND() LIMIT 50");
-$qstmt->bind_param("i", $exam_id);
+// ✅ Fetch 50 random questions, excluding those already answered by this student in previous attempts of THIS exam.
+$qstmt = $conn->prepare("
+    SELECT * FROM questions
+    WHERE exam_id = ?
+      AND id NOT IN (
+        SELECT aa.question_id
+        FROM attempt_answers aa
+        JOIN attempts a ON aa.attempt_id = a.id
+        WHERE a.student_id = ? AND a.exam_id = ?
+      )
+    ORDER BY RAND()
+    LIMIT 50
+");
+$qstmt->bind_param("iii", $exam_id, $student_id, $exam_id);
 $qstmt->execute();
 $questions = $qstmt->get_result();
 $qstmt->close();
@@ -55,9 +52,8 @@ while ($q = $questions->fetch_assoc()) {
 }
 
 // 🚫 Validation: Check if questions were actually found
-if (empty($fetched_questions) || count($fetched_questions) < 50) {
-    // FIX: Redirect instead of dying for better UX
-    $_SESSION['error'] = 'This exam has fewer than 50 questions. Ask your teacher to add more.';
+if (empty($fetched_questions)) {
+    $_SESSION['error'] = 'No more new questions available for this exam.';
     header("Location: student_dashboard.php");
     exit;
 }
