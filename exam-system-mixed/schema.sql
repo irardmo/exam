@@ -1,6 +1,7 @@
 -- 1. Authentication Table (Simplified)
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NULL,
     username VARCHAR(60) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     role ENUM('admin','teacher','student') NOT NULL,
@@ -55,6 +56,8 @@ CREATE TABLE IF NOT EXISTS attempts (
   student_id INT NOT NULL,
   selected_question_ids TEXT NOT NULL,
   raw_score INT DEFAULT NULL,
+  max_score INT DEFAULT NULL,
+  percentage DECIMAL(5,2) DEFAULT NULL,
   transmuted INT DEFAULT NULL,
   needs_manual_grading TINYINT(1) DEFAULT 0,
   started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

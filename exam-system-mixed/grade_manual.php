@@ -10,6 +10,7 @@ $attempt_id = 0;
 
 // --- LIST PENDING ATTEMPTS (INITIAL LOAD) ---
 // Securely list attempts needing manual grading
+// Use u.name from users table
 $stmt_list = $conn->prepare("SELECT a.id, a.exam_id, u.name as student, a.started_at, a.submitted_at FROM attempts a JOIN users u ON u.id=a.student_id WHERE a.needs_manual_grading=1 ORDER BY a.id DESC");
 if (!$stmt_list) die("Database error during list setup: " . $conn->error);
 $stmt_list->execute();

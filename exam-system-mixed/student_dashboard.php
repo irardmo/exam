@@ -42,6 +42,10 @@
     <div class="card">
         <h2>Welcome, <?php echo htmlspecialchars($_SESSION['user']['name']); ?></h2>
 
+        <?php if (!empty($_SESSION['error'])): ?>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($_SESSION['error']); unset($_SESSION['error']); ?></div>
+        <?php endif; ?>
+
         <h3>Available Exams &amp; Results</h3>
 
         <?php if ($result->num_rows > 0): ?>

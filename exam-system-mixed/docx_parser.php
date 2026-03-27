@@ -13,14 +13,16 @@ function docx_to_text($file) {
             $xml_content = $zip->getFromIndex($index);
             $zip->close();
             
-            // FIX 1: Robust XML parsing using regex to target text nodes and insert spaces
-            // The document.xml uses <w:t> tags for text. Replace all </w:t> with a space 
-            // and then strip the remaining tags.
-            $text_with_spaces = preg_replace('/<\/w:t>/', ' ', $xml_content);
-            $text = strip_tags($text_with_spaces);
+            // FIX 1: Robust XML parsing.
+            // Replace text node ends with space to prevent word collapsing.
+            $xml_content = preg_replace('/<\/w:t>/', ' ', $xml_content);
+            // Replace paragraph ends and line breaks with newlines to preserve structure for the parser.
+            $xml_content = preg_replace('/<\/w:p>/', "\n", $xml_content);
+            $xml_content = preg_replace('/<w:br\/>/', "\n", $xml_content);
             
-            // Clean up multiple spaces and trim
-            return trim(preg_replace('/\s+/', ' ', $text));
+            $text = strip_tags($xml_content);
+
+            return trim($text);
         }
     }
     return false;
@@ -36,11 +38,11 @@ function parse_mixed_blocks($text) {
         if (!$line) continue;
 
         // Detect Question Start (Q: ..., Question 1., etc.)
-        if (preg_match('/^(Q|Question)\s*\d*[:.)]?\s*(.+)$/i', $line, $m)) {
+        if (preg_match('/^Q(?:uestion)?\s*\d*[:.)]?\s*(.+)$/i', $line, $m)) {
             if ($current) $items[] = $current; // Save previous
             $current = [
                 'type' => 'mcq', 
-                'question' => $m[2],
+                'question' => $m[1],
                 'A' => null, 'B' => null, 'C' => null, 'D' => null,
                 'correct' => null,
                 'answer_text' => null

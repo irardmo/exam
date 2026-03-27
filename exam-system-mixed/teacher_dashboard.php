@@ -3,6 +3,7 @@ session_start();
 require_once 'helpers.php';
 include 'db.php';
 include 'header.php';
+include 'docx_parser.php';
 
 // Check if teacher is logged in
 if (!isset($_SESSION['user']) || $_SESSION['user']['role'] !== 'teacher') {
@@ -57,66 +58,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['question']) && empty(
 }
 
 // ----------------------------------------------------------------------
-// 2. Handle CSV upload (SECURE, PERFORMANT, & COLUMN-FIXED)
+// 2. Handle Multiple File (CSV or DOCX) or Folder upload
 // ----------------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['files']['name'][0])) {
     $exam_id = (int)$_POST['exam_id'];
     $created_by = $_SESSION['user']['id'];
+    $total_rowCount = 0;
+    $errors = [];
 
-    if ($_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-        $message = "❌ Upload error. Please try again.";
-    } else {
-        $fileName = $_FILES['file']['tmp_name'];
+    foreach ($_FILES['files']['name'] as $i => $name) {
+        if ($_FILES['files']['error'][$i] !== UPLOAD_ERR_OK) {
+            $errors[] = "❌ Error uploading " . h($name) . ".";
+            continue;
+        }
+
+        $tmpName = $_FILES['files']['tmp_name'][$i];
+        $fileType = pathinfo($name, PATHINFO_EXTENSION);
         $rowCount = 0;
 
-        if (($file = fopen($fileName, "r")) !== false) {
-            
-            // FIX: Prepare statement once before the loop (performance and security)
-            $sql = "INSERT INTO questions (exam_id, question_text, option_a, option_b, option_c, option_d, correct_answer, created_by, created_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
-            $stmt = $conn->prepare($sql);
-            
-            if (!$stmt) {
-                $message = "❌ Error preparing statement for CSV upload: " . $conn->error;
-            } else {
-                // skip header if your CSV has one:
-                // fgetcsv($file, 10000, ","); 
-                
-                while (($row = fgetcsv($file, 10000, ",")) !== false) {
-                    if (count($row) < 6) continue;
-
-                    $question_text = $row[0] ?? '';
-                    $option_a = $row[1] ?? '';
-                    $option_b = $row[2] ?? '';
-                    $option_c = $row[3] ?? '';
-                    $option_d = $row[4] ?? '';
-                    $correct_answer = strtoupper(trim($row[5] ?? ''));
-
-                    if ($question_text && $option_a && $option_b && $option_c && $option_d && in_array($correct_answer, ['A','B','C','D'], true)) {
-                        
-                        // FIX: Bind and execute prepared statement inside the loop
-                        $stmt->bind_param('issssssi', 
-                            $exam_id, 
-                            $question_text, 
-                            $option_a, 
-                            $option_b, 
-                            $option_c, 
-                            $option_d, 
-                            $correct_answer, 
-                            $created_by
-                        );
-                        if ($stmt->execute()) {
-                            $rowCount++;
+        if ($fileType === 'csv') {
+            if (($file = fopen($tmpName, "r")) !== false) {
+                $sql = "INSERT INTO questions (exam_id, question_text, option_a, option_b, option_c, option_d, correct_answer, created_by, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                $stmt = $conn->prepare($sql);
+                if ($stmt) {
+                    while (($row = fgetcsv($file, 10000, ",")) !== false) {
+                        if (count($row) < 6) continue;
+                        $question_text = $row[0] ?? '';
+                        $option_a = $row[1] ?? '';
+                        $option_b = $row[2] ?? '';
+                        $option_c = $row[3] ?? '';
+                        $option_d = $row[4] ?? '';
+                        $correct_answer = strtoupper(trim($row[5] ?? ''));
+                        if ($question_text && $option_a && $option_b && $option_c && $option_d && in_array($correct_answer, ['A','B','C','D'], true)) {
+                            $stmt->bind_param('issssssi', $exam_id, $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer, $created_by);
+                            if ($stmt->execute()) $rowCount++;
                         }
                     }
+                    $stmt->close();
                 }
-                $stmt->close();
-                $message = "✅ $rowCount questions uploaded successfully!";
+                fclose($file);
             }
-            fclose($file);
-        } else {
-            $message = "❌ Unable to read the CSV file.";
+        } elseif ($fileType === 'docx') {
+            $text = docx_to_text($tmpName);
+            if ($text) {
+                $items = parse_mixed_blocks($text);
+                $sql = "INSERT INTO questions (exam_id, type, question_text, option_a, option_b, option_c, option_d, correct_answer, answer_text, created_by, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                $stmt = $conn->prepare($sql);
+                if ($stmt) {
+                    foreach ($items as $item) {
+                        $qtype = $item['type'];
+                        $qtext = $item['question'];
+                        $oa = $item['A'];
+                        $ob = $item['B'];
+                        $oc = $item['C'];
+                        $od = $item['D'];
+                        $ca = $item['correct'];
+                        $at = $item['answer_text'];
+                        $stmt->bind_param('issssssssi', $exam_id, $qtype, $qtext, $oa, $ob, $oc, $od, $ca, $at, $created_by);
+                        if ($stmt->execute()) $rowCount++;
+                    }
+                    $stmt->close();
+                }
+            }
         }
+        $total_rowCount += $rowCount;
+    }
+
+    $message = "✅ $total_rowCount questions uploaded from " . count($_FILES['files']['name']) . " files successfully!";
+    if (!empty($errors)) {
+        $message .= "<br>" . implode("<br>", $errors);
     }
 }
 ?>
@@ -130,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
 
     <div class="tab-container">
         <button class="tab active" data-tab-target="add-question">Add Questions</button>
-        <button class="tab" data-tab-target="upload-csv">Upload CSV</button>
+        <button class="tab" data-tab-target="upload-csv">Upload CSV/DOCX</button>
         <button class="tab" data-tab-target="view-results">View Results</button>
     </div>
 
@@ -160,8 +172,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
     </div>
 
     <div id="upload-csv" class="tab-content">
-        <h3>Upload Questions</h3>
-        <form method="POST" enctype="multipart/form-data">
+        <h3>Upload Questions (CSV or DOCX)</h3>
+        <p class="muted">You can select multiple files or a folder. Max size: 300MB.</p>
+        <form method="POST" enctype="multipart/form-data" id="upload-form">
             <div class="form-group">
                 <label for="exam_id_upload">Select Exam:</label>
                 <select id="exam_id_upload" name="exam_id" required>
@@ -177,8 +190,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
             </div>
 
             <div class="form-group">
-                <label for="file">Select File (CSV):</label>
-                <input type="file" id="file" name="file" accept=".csv" required>
+                <label for="file">Select Files or Folder (CSV or DOCX):</label>
+                <input type="file" id="file" name="files[]" accept=".csv,.docx" multiple webkitdirectory mozdirectory required>
             </div>
 
             <button type="submit" class="btn">Upload</button>
@@ -194,8 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
         // --- CORRECTED SQL QUERY (Fixes Missing Student Name) ---
         $results = $conn->query("
             SELECT a.id AS attempt_id,
-                    -- FIX: Concatenate first and last name from students table
-                    CONCAT(s.first_name, ' ', s.last_name) AS student_full_name,
+                    u.name AS student_full_name,
                     e.title AS exam_title,
                     a.raw_score,         
                     a.max_score,
@@ -204,7 +216,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_FILES['file']['name'])) {
             FROM attempts a
             JOIN exams e ON a.exam_id = e.id
             JOIN users u ON a.student_id = u.id        -- Joins attempt to user
-            JOIN students s ON u.id = s.user_id        -- Joins user to student details
             WHERE a.submitted_at IS NOT NULL
             ORDER BY a.submitted_at DESC
         ");
